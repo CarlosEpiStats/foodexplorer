@@ -2,19 +2,37 @@
 #'
 #' @param request Internal parameter for `{shiny}`.
 #'     DO NOT REMOVE.
-#' @import shiny
 #' @noRd
 app_ui <- function(request) {
-  tagList(
+  shiny::tagList(
     # Leave this function for adding external resources
     golem_add_external_resources(),
     # Your application UI logic
-    fluidPage(
+    shiny::fluidPage(
       shinydashboard::dashboardPage(
         header = shinydashboard::dashboardHeader(
           title = "foodexplorer Shiny App"
         ),
-        sidebar = shinydashboard::dashboardSidebar(),
+        sidebar = shinydashboard::dashboardSidebar(
+          shinydashboard::sidebarMenu(
+            id = "tabs",
+            shinydashboard::menuItem(
+              "How to use",
+              tabName = "tab-welcome",
+              icon = shiny::icon("info")
+            ),
+            shinydashboard::menuItem(
+              "Explore trends",
+              tabName = "tab-trends",
+              icon = shiny::icon("arrow-trend-up")
+            ),
+            shinydashboard::menuItem(
+              "Download data",
+              tabName = "tab-download",
+              icon = shiny::icon("download")
+            )
+          )
+        ),
         body = shinydashboard::dashboardBody()
       )
     )
@@ -26,18 +44,17 @@ app_ui <- function(request) {
 #' This function is internally used to add external
 #' resources inside the Shiny application.
 #'
-#' @import shiny
-#' @importFrom golem add_resource_path activate_js favicon bundle_resources
+
 #' @noRd
 golem_add_external_resources <- function() {
-  add_resource_path(
+  golem::add_resource_path(
     "www",
     app_sys("app/www")
   )
 
-  tags$head(
-    favicon(),
-    bundle_resources(
+  shiny::tags$head(
+    golem::favicon(),
+    golem::bundle_resources(
       path = app_sys("app/www"),
       app_title = "foodexplorer"
     )
