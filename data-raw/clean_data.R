@@ -20,14 +20,6 @@ extract_cells <- function(file_path, sheet_name) {
   cells
 }
 
-# Get products per hierarchy level
-get_hierarchy_level <- function(data, level) {
-  variable_name <- paste0("category_", level)
-  data |>
-    dplyr::filter(.data$hierarchy == level) |>
-    dplyr::select("row", "col", {{ variable_name }} := "product")
-}
-
 # Clean variables
 clean_names <- function(variable) {
   variable <- plyr::mapvalues(
@@ -37,67 +29,13 @@ clean_names <- function(variable) {
   )
   variable
 }
-### Transform Excel cells ----
-clean_file <- function(file_path) {
-  # Loop for sll sheets
-  sheet_names <- readxl::excel_sheets(file_path)
-  data_list <- vector(mode = "list", length = length(sheet_names))
-  file_name <- stringr::str_extract(file_path, "[0-9]{4}.*$")
-  message(
-    "Cleaning file: ",
-    file_name,
-    ", number of sheets: ",
-    length(sheet_names)
-  )
-  for (sheet_index in seq_along(sheet_names)) {
-    cells <- extract_cells(file_path, sheet_names[sheet_index])
 
-    # Subset headers for joining later
-    cells_products <- cells |>
-      dplyr::filter(.data$col == 1, .data$row >= 4) |>
-      dplyr::select("row", "col", product = "character")
-
-    # Get the values
-    values <- cells |>
-      dplyr::filter(.data$row >= 2, col >= 2) |>
-      unpivotr::behead(direction = "NNW", name = "region") |> # finds the region as a header direction north-west (up, then left)
-      unpivotr::behead(direction = "N", name = "variable") |> # the variable is right above the cell value (north: up)
-      unpivotr::enhead(cells_products, direction = "left") |> # adds back the product name
-      dplyr::select(
-        "row",
-        "col",
-        "variable",
-        "region",
-        "product",
-        "numeric"
-      )
-
-    message(
-      "Cleaned file: ",
-      file_name,
-      ", sheet: ",
-      sheet_index,
-      "/",
-      length(sheet_names)
-    )
-    data_list[[sheet_index]] <- values
-  }
-  data <- dplyr::bind_rows(data_list) |>
-    # Clean names
-    dplyr::mutate(
-      dplyr::across(
-        tidyselect::all_of(c("product", "variable", "region")),
-        clean_names
-      )
-    )
-
-  # Obtain nested hierarchy
-  hierarchy <- get_hierarchy_table(file_path)
-  data_hierarchy <- data |>
-    dplyr::left_join(hierarchy, by = c("product", "row"))
-  message("Hierarchy added to ", file_name)
-  message("Finished cleaning file: ", file_name, " -----------------------")
-  data_hierarchy
+# Get products per hierarchy level
+get_hierarchy_level <- function(data, level) {
+  variable_name <- paste0("category_", level)
+  data |>
+    dplyr::filter(.data$hierarchy == level) |>
+    dplyr::select("row", "col", {{ variable_name }} := "product")
 }
 
 # Use the first sheet as template to extract the hierarchies
@@ -167,12 +105,89 @@ get_hierarchy_table <- function(file_path) {
   data_hierarchy
 }
 
+### Transform Excel cells ----
+clean_file <- function(file_path) {
+  # Loop for all sheets
+  sheet_names <- readxl::excel_sheets(file_path)
+  # Some files have a first page without data
+  if (length(sheet_names) == 13) {
+    sheet_names <- sheet_names[-1]
+  }
+  data_list <- vector(mode = "list", length = length(sheet_names))
+  file_name <- stringr::str_extract(file_path, "[0-9]{4}.*$")
+  year <- substr(file_name, 1, 4)
+  message(
+    "Cleaning file: ",
+    file_name,
+    ", number of sheets: ",
+    length(sheet_names)
+  )
+  for (sheet_index in seq_along(sheet_names)) {
+    cells <- extract_cells(file_path, sheet_names[sheet_index])
+
+    # Subset headers for joining later
+    cells_products <- cells |>
+      dplyr::filter(.data$col == 1, .data$row >= 4) |>
+      dplyr::select("row", "col", product = "character")
+
+    # Get the values
+    values <- cells |>
+      dplyr::filter(.data$row >= 2, col >= 2) |>
+      unpivotr::behead(direction = "NNW", name = "region") |> # finds the region as a header direction north-west (up, then left)
+      unpivotr::behead(direction = "N", name = "variable") |> # the variable is right above the cell value (north: up)
+      unpivotr::enhead(cells_products, direction = "left") |> # adds back the product name
+      dplyr::select(
+        "row",
+        "variable",
+        "region",
+        "product",
+        "numeric"
+      ) |>
+      dplyr::mutate(
+        year = year,
+        month = sheet_index,
+        date = lubridate::make_date(.data$year, .data$month, 1L)
+      )
+
+    message(
+      "Cleaned file: ",
+      file_name,
+      ", sheet: ",
+      sheet_index,
+      "/",
+      length(sheet_names)
+    )
+    data_list[[sheet_index]] <- values
+  }
+  message("Joining months ...")
+  data <- dplyr::bind_rows(data_list) |>
+    # Clean names
+    dplyr::mutate(
+      dplyr::across(
+        tidyselect::all_of(c("product", "variable", "region")),
+        clean_names
+      )
+    )
+
+  # Obtain nested hierarchy
+  message("Adding nested hierarchy to ", file_name, " ...")
+  hierarchy <- get_hierarchy_table(file_path)
+  data_hierarchy <- data |>
+    dplyr::left_join(hierarchy, by = c("product", "row"))
+
+  message("Finished cleaning file: ", file_name, " -----------------------")
+  data_hierarchy
+}
+
 # Step by step
 file_dir <- here::here("data-raw")
 file_list <- list.files(file_dir, pattern = "*.xlsx")
-# Test with one file
-file_name <- file_list[29]
-file_path <- here::here(file_dir, file_name)
-
-test_data <- clean_file(file_path)
-(hierarchy <- get_hierarchy_table(file_path))
+# Test with two files
+loop_over <- 28:29
+data_list <- vector(mode = "list", length = length(loop_over))
+for (i in loop_over) {
+  file_name <- file_list[i]
+  file_path <- here::here(file_dir, file_name)
+  data_list[[i]] <- clean_file(file_path)
+}
+(data <- dplyr::bind_rows(data_list))
