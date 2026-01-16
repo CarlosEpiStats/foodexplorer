@@ -191,7 +191,7 @@ clean_file <- function(file_path) {
 file_dir <- here::here("data-raw")
 file_list <- list.files(file_dir, pattern = "*.xlsx")
 # Test with two files
-loop_over <- 15:29
+loop_over <- 6:length(file_list)
 data_list <- vector(mode = "list", length = length(loop_over))
 for (i in loop_over) {
   file_name <- file_list[i]
@@ -219,3 +219,4 @@ data |>
 
 # Monthly data should account for the different numbers of days each month
 # (February always have less total consumption)
+unique(data$year)
