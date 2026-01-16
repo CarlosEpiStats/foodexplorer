@@ -122,6 +122,7 @@ clean_file <- function(file_path) {
   data_list <- vector(mode = "list", length = length(sheet_names))
   file_name <- stringr::str_extract(file_path, "[0-9]{4}.*$")
   year <- substr(file_name, 1, 4)
+  census_base <- stringr::str_extract(file_name, "base([0-9]{4})", group = 1)
   message(
     "Cleaning file: ",
     file_name,
@@ -169,6 +170,7 @@ clean_file <- function(file_path) {
   data <- dplyr::bind_rows(data_list) |>
     # Clean names
     dplyr::mutate(
+      census_base = census_base,
       dplyr::across(
         tidyselect::all_of(c("product", "variable", "region")),
         clean_names
@@ -189,7 +191,7 @@ clean_file <- function(file_path) {
 file_dir <- here::here("data-raw")
 file_list <- list.files(file_dir, pattern = "*.xlsx")
 # Test with two files
-loop_over <- 28:29
+loop_over <- 20:29
 data_list <- vector(mode = "list", length = length(loop_over))
 for (i in loop_over) {
   file_name <- file_list[i]
@@ -205,7 +207,12 @@ data |>
     product == "total_alimentacion"
   ) |>
   ggplot2::ggplot(
-    ggplot2::aes(x = date, y = numeric)
+    ggplot2::aes(
+      x = date,
+      y = numeric,
+      group = census_base,
+      color = census_base
+    )
   ) +
   ggplot2::geom_line() +
   ggplot2::geom_point()
