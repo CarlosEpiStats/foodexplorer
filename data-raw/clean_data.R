@@ -44,7 +44,13 @@ get_hierarchy_table <- function(file_path) {
   formats <- tidyxl::xlsx_formats(file_path)
   indent <- formats$local$alignment$indent # Maps each local_format_id to an indentation number
   sheet_names <- readxl::excel_sheets(file_path)
-  cells <- extract_cells(file_path, sheet_names[1]) |>
+  # If there are 13 sheets, the first is a front page and should be skipped
+  if (length(sheet_names) == 13) {
+    sheet_index <- 2
+  } else {
+    sheet_index <- 1
+  }
+  cells <- extract_cells(file_path, sheet_names[sheet_index]) |>
     dplyr::select("row", "col", product = "character", "local_format_id")
 
   # Get each product and its hierarchy
@@ -191,3 +197,15 @@ for (i in loop_over) {
   data_list[[i]] <- clean_file(file_path)
 }
 (data <- dplyr::bind_rows(data_list))
+
+data |>
+  dplyr::filter(
+    region == "t_espana",
+    variable == "consumo_x_capita",
+    product == "total_alimentacion"
+  ) |>
+  ggplot2::ggplot(
+    ggplot2::aes(x = date, y = numeric)
+  ) +
+  ggplot2::geom_line() +
+  ggplot2::geom_point()
