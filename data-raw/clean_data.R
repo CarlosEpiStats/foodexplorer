@@ -148,7 +148,7 @@ clean_file <- function(file_path) {
         "variable",
         "region",
         "product",
-        "numeric"
+        "value" = "numeric"
       ) |>
       dplyr::mutate(
         year = year,
@@ -191,7 +191,7 @@ clean_file <- function(file_path) {
 file_dir <- here::here("data-raw")
 file_list <- list.files(file_dir, pattern = "*.xlsx")
 # Test with two files
-loop_over <- 20:29
+loop_over <- 15:29
 data_list <- vector(mode = "list", length = length(loop_over))
 for (i in loop_over) {
   file_name <- file_list[i]
@@ -209,10 +209,13 @@ data |>
   ggplot2::ggplot(
     ggplot2::aes(
       x = date,
-      y = numeric,
+      y = value,
       group = census_base,
-      color = census_base
+      color = as.factor(month)
     )
   ) +
   ggplot2::geom_line() +
   ggplot2::geom_point()
+
+# Monthly data should account for the different numbers of days each month
+# (February always have less total consumption)
