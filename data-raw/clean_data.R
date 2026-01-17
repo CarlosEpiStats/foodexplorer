@@ -121,7 +121,7 @@ clean_file <- function(file_path) {
   }
   data_list <- vector(mode = "list", length = length(sheet_names))
   file_name <- stringr::str_extract(file_path, "[0-9]{4}.*$")
-  year <- substr(file_name, 1, 4)
+  year <- as.numeric(substr(file_name, 1, 4))
   census_base <- stringr::str_extract(file_name, "base([0-9]{4})", group = 1)
   message(
     "Cleaning file: ",
@@ -178,20 +178,23 @@ clean_file <- function(file_path) {
     )
 
   # Obtain nested hierarchy
-  message("Adding nested hierarchy to ", file_name, " ...")
-  hierarchy <- get_hierarchy_table(file_path)
-  data_hierarchy <- data |>
-    dplyr::left_join(hierarchy, by = c("product", "row"))
-
+  # This is only available from 2014 onwards, before that there's no
+  # explicit hierarchy as cell indentation
+  if (year >= 2014) {
+    message("Adding nested hierarchy to ", file_name, " ...")
+    hierarchy <- get_hierarchy_table(file_path)
+    data <- data |>
+      dplyr::left_join(hierarchy, by = c("product", "row"))
+  }
   message("Finished cleaning file: ", file_name, " -----------------------")
-  data_hierarchy
+  data
 }
 
 # Step by step
 file_dir <- here::here("data-raw")
 file_list <- list.files(file_dir, pattern = "*.xlsx")
 # Test with two files
-loop_over <- 6:length(file_list)
+loop_over <- seq_along(file_list)
 data_list <- vector(mode = "list", length = length(loop_over))
 for (i in loop_over) {
   file_name <- file_list[i]
@@ -204,7 +207,7 @@ data |>
   dplyr::filter(
     region == "t_espana",
     variable == "consumo_x_capita",
-    product == "total_alimentacion"
+    product == "platos_preparados"
   ) |>
   ggplot2::ggplot(
     ggplot2::aes(
@@ -219,4 +222,10 @@ data |>
 
 # Monthly data should account for the different numbers of days each month
 # (February always have less total consumption)
+
+# Fit ARIMA models to account for seasonal change, and get yearly trends
+# And seasonal profiles
+
+# Another way of adding unique ids for products/categories
 unique(data$year)
+unique(data$variable)
