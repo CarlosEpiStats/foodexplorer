@@ -105,9 +105,18 @@ get_hierarchy_table <- function(file_path) {
     products_4,
     products_5
   ) |>
-    dplyr::select(-c("col", "local_format_id"))
-  # There are duplicated names in different subcategories, so we keep row as identifier
-  # Example, three rows for PIMIENTOS (in T.HORTALIZAS FRESCAS, FRUTA&HORTA.CONSERVA, FRUTA&HORTA.CONGELAD)
+    dplyr::select(-c("col", "local_format_id")) |>
+    # There are duplicated names in different subcategories, so we keep row as identifier
+    # Example, three rows for PIMIENTOS (in T.HORTALIZAS FRESCAS, FRUTA&HORTA.CONSERVA, FRUTA&HORTA.CONGELAD)
+    dplyr::mutate(
+      parent_category = dplyr::coalesce(
+        .data$category_4,
+        .data$category_3,
+        .data$category_2,
+        .data$category_1,
+        .data$category_0
+      )
+    )
   data_hierarchy
 }
 
@@ -201,7 +210,11 @@ clean_file <- function(file_path) {
       ),
       consumo_capita_dia = .data$consumo_x_capita / days_month,
       gasto_capita_dia = .data$gasto_x_capita / days_month
-    )
+    ) |>
+    # Get duplicated product name
+    dplyr::group_by(.data$product, .data$month, .data$region) |>
+    dplyr::mutate(duplicated = dplyr::n()) |>
+    dplyr::ungroup()
 
   # Obtain nested hierarchy
   # This is only available from 2014 onwards, before that there's no
@@ -219,8 +232,8 @@ clean_file <- function(file_path) {
 # Step by step
 file_dir <- here::here("data-raw")
 file_list <- list.files(file_dir, pattern = "*.xlsx")
-# loop_over <- seq_along(file_list)
-loop_over <- length(file_list)
+loop_over <- seq_along(file_list)
+# loop_over <- length(file_list)
 data_list <- vector(mode = "list", length = length(loop_over))
 for (i in loop_over) {
   file_name <- file_list[i]
@@ -237,7 +250,7 @@ data |>
   ggplot2::ggplot(
     ggplot2::aes(
       x = date,
-      y = consumo_capita_dia,
+      y = consumo_x_capita,
       group = census_base,
       color = as.factor(month)
     )
@@ -251,5 +264,136 @@ data |>
 # Fit ARIMA models to account for seasonal change, and get yearly trends
 # And seasonal profiles
 
-# Another way of adding unique ids for products/categories
-unique(data$year)
+# Adding unique ids for products/categories
+data |>
+  dplyr::filter(duplicated > 1) |>
+  dplyr::mutate(
+    full_name = dplyr::case_when(
+      is.na(hierarchy) ~ paste("?", product, sep = "/"),
+      hierarchy == 0 ~ product,
+      hierarchy == 1 ~ paste(category_0, product, sep = "/"),
+      hierarchy == 2 ~ paste(category_0, category_1, product, sep = "/"),
+      hierarchy == 3 ~ paste(
+        category_0,
+        category_1,
+        category_2,
+        product,
+        sep = "/"
+      ),
+      hierarchy == 4 ~ paste(
+        category_0,
+        category_1,
+        category_2,
+        category_3,
+        product,
+        sep = "/"
+      ),
+      hierarchy == 5 ~ paste(
+        category_0,
+        category_1,
+        category_2,
+        category_3,
+        category_4,
+        product,
+        sep = "/"
+      ),
+    ),
+    # Manual changes
+    unique_name = dplyr::case_when(
+      # frozen or conserved vegetables
+      duplicated == 1 ~ product,
+      stringr::str_detect(parent_category, "congelad") ~ paste0(
+        product,
+        "_congelados"
+      ),
+      stringr::str_detect(parent_category, "conserva") ~ paste0(
+        product,
+        "_conservas"
+      ),
+      stringr::str_detect(parent_category, "verd|fresca") ~ paste0(
+        product,
+        "_frescos"
+      ),
+      stringr::str_detect(parent_category, "fiambres") ~ paste0(
+        product,
+        "_fiambres"
+      ),
+      stringr::str_detect(parent_category, "x1_litro") ~ paste0(
+        product,
+        "_1_litro"
+      ),
+      stringr::str_detect(parent_category, "huevos") ~ paste0(
+        "huevos_",
+        product
+      ),
+      stringr::str_detect(parent_category, "cacao_soluble|arroz") ~ paste(
+        parent_category,
+        product,
+        sep = "_"
+      ),
+      stringr::str_detect(parent_category, "mayor_1_litro") ~ paste(
+        product,
+        parent_category,
+        sep = "_"
+      ),
+      .default = product
+    )
+  ) |>
+  dplyr::count(
+    product,
+    # full_name,
+    # duplicated,
+    unique_name,
+    parent_category,
+    year,
+    # census_base
+  ) |>
+  dplyr::filter(is.na(parent_category)) |>
+  dplyr::arrange(
+    product,
+    dplyr::desc(year),
+    # census_base,
+    # duplicated,
+    parent_category
+  ) |>
+  print(n = Inf)
+
+
+# Something strange happens
+# Alcachofas don't have precio_medio_kg
+# December 2019 is different from the rest of the year
+# This results in different rows per products, and some variables are not well read also
+# I need to think a better way of identifying unique products
+
+data |> dplyr::filter(year == 2019, product == "alcachofas")
+
+products_2019_12 <- data |>
+  dplyr::filter(year == 2019, month == 12) |>
+  dplyr::distinct(product) |>
+  dplyr::pull()
+products_2019_11 <- data |>
+  dplyr::filter(year == 2019, month == 11) |>
+  dplyr::distinct(product) |>
+  dplyr::pull()
+
+products_2019_12[!products_2019_12 %in% products_2019_11]
+
+# TODO: create hierarchy for each sheet with indentation (not only once for each book)
+# If a sheet doesn't have indentation, apply the previous hierarchy
+
+unique_product_names <- sort(unique(data$product))
+length(unique_product_names)
+
+# Some names are uninterpretable on their own (e.g., "x1_litro") and would need adding their parent category
+# Products change names with time, making comparisons hard
+data |>
+  dplyr::count(product, year) |>
+  dplyr::arrange(year) |>
+  dplyr::mutate(n = "X") |>
+  tidyr::pivot_wider(
+    names_from = year,
+    values_from = n,
+    values_fill = "-"
+  ) |>
+  dplyr::arrange(product) |>
+  print(n = Inf)
