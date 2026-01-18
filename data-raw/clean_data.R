@@ -39,16 +39,16 @@ get_hierarchy_level <- function(data, level) {
 }
 
 # Use the first sheet as template to extract the hierarchies
-get_hierarchy_table <- function(file_path) {
+get_hierarchy_table <- function(file_path, month = 1) {
   # Get personalized Excel formats, that convey meaning of hierarchy
   formats <- tidyxl::xlsx_formats(file_path)
   indent <- formats$local$alignment$indent # Maps each local_format_id to an indentation number
   sheet_names <- readxl::excel_sheets(file_path)
   # If there are 13 sheets, the first is a front page and should be skipped
   if (length(sheet_names) == 13) {
-    sheet_index <- 2
+    sheet_index <- month + 1
   } else {
-    sheet_index <- 1
+    sheet_index <- month
   }
   cells <- extract_cells(file_path, sheet_names[sheet_index]) |>
     dplyr::select("row", "col", product = "character", "local_format_id")
@@ -180,7 +180,9 @@ clean_file <- function(file_path) {
       ", sheet: ",
       sheet_index,
       "/",
-      length(sheet_names)
+      length(sheet_names),
+      ". Unique products: ",
+      length(unique(values$product))
     )
     data_list[[sheet_index]] <- values
   }
@@ -192,13 +194,14 @@ clean_file <- function(file_path) {
       dplyr::across(
         tidyselect::all_of(c("product", "variable", "region")),
         clean_names
-      )
+      ),
+      # Some variables changed name (e.g., "volumen_kg_o_litros" as "volumen_kg")
+      variable = stringr::str_remove_all(.data$variable, "_o_litros")
     ) |>
     # Pivot variables to make plotting easier
     tidyr::pivot_wider(
       values_from = "value",
-      names_from = "variable",
-      id_cols =
+      names_from = "variable"
     ) |>
     # Adjust for different number of days per month
     dplyr::mutate(
@@ -217,19 +220,42 @@ clean_file <- function(file_path) {
     dplyr::ungroup()
 
   # Obtain nested hierarchy
-  # This is only available from 2014 onwards, before that there's no
+  # This is only available from 2004 onwards, before that there's no
   # explicit hierarchy as cell indentation
-  if (year >= 2014) {
+  if (year >= 2004) {
     message("Adding nested hierarchy to ", file_name, " ...")
-    hierarchy <- get_hierarchy_table(file_path)
-    data <- data |>
-      dplyr::left_join(hierarchy, by = c("product", "row"))
+    hierarchy <- get_hierarchy_table(file_path, month = 1)
+
+    # For 2013_05 and 2019_12, get hierarchy separatedly
+    # because these months have a different list of products
+    if (year == 2013) {
+      hierarchy_2013_05 <- get_hierarchy_table(file_path, month = 5)
+      data_without_05 <- data |>
+        dplyr::filter(.data$month != 5) |>
+        dplyr::left_join(hierarchy, by = c("product", "row"))
+      data_05 <- data |>
+        dplyr::filter(.data$month == 5) |>
+        dplyr::left_join(hierarchy_2013_05, by = c("product", "row"))
+      data <- dplyr::bind_rows(data_without_05, data_05)
+    } else if (year == 2019) {
+      hierarchy_2019_12 <- get_hierarchy_table(file_path, month = 12)
+      data_without_12 <- data |>
+        dplyr::filter(.data$month != 12) |>
+        dplyr::left_join(hierarchy, by = c("product", "row"))
+      data_12 <- data |>
+        dplyr::filter(.data$month == 12) |>
+        dplyr::left_join(hierarchy_2019_12, by = c("product", "row"))
+      data <- dplyr::bind_rows(data_without_12, data_12)
+    } else {
+      data <- data |>
+        dplyr::left_join(hierarchy, by = c("product", "row"))
+    }
   }
   message("Finished cleaning file: ", file_name, " -----------------------")
   data
 }
 
-# Step by step
+# Execute functions ----
 file_dir <- here::here("data-raw")
 file_list <- list.files(file_dir, pattern = "*.xlsx")
 loop_over <- seq_along(file_list)
@@ -242,6 +268,7 @@ for (i in loop_over) {
 }
 (data <- dplyr::bind_rows(data_list))
 
+# Explore data ----
 data |>
   dplyr::filter(
     region == "t_espana",
@@ -250,7 +277,7 @@ data |>
   ggplot2::ggplot(
     ggplot2::aes(
       x = date,
-      y = consumo_x_capita,
+      y = consumo_capita_dia,
       group = census_base,
       color = as.factor(month)
     )
@@ -258,13 +285,12 @@ data |>
   ggplot2::geom_line() +
   ggplot2::geom_point()
 
-# Monthly data should account for the different numbers of days each month
-# (February always have less total consumption)
+# Playground ----
 
 # Fit ARIMA models to account for seasonal change, and get yearly trends
 # And seasonal profiles
 
-# Adding unique ids for products/categories
+## Adding unique ids for products/categories ----
 data |>
   dplyr::filter(duplicated > 1) |>
   dplyr::mutate(
@@ -345,45 +371,24 @@ data |>
     # duplicated,
     unique_name,
     parent_category,
-    year,
+    # year,
+    # month
     # census_base
   ) |>
-  dplyr::filter(is.na(parent_category)) |>
   dplyr::arrange(
     product,
-    dplyr::desc(year),
+    # dplyr::desc(year),
     # census_base,
     # duplicated,
     parent_category
   ) |>
   print(n = Inf)
 
+# Strange happenings here, seems like they have been mixed for special months
+# There are indentations errors in the Excel files! (e.g., T.FRUTA&HORTA.TRANSF is below PERAS in year 2005)
+# How can I detect this? Or should I use only the latest hiearchy and try to fit the rest of the years in that mold?
 
-# Something strange happens
-# Alcachofas don't have precio_medio_kg
-# December 2019 is different from the rest of the year
-# This results in different rows per products, and some variables are not well read also
-# I need to think a better way of identifying unique products
-
-data |> dplyr::filter(year == 2019, product == "alcachofas")
-
-products_2019_12 <- data |>
-  dplyr::filter(year == 2019, month == 12) |>
-  dplyr::distinct(product) |>
-  dplyr::pull()
-products_2019_11 <- data |>
-  dplyr::filter(year == 2019, month == 11) |>
-  dplyr::distinct(product) |>
-  dplyr::pull()
-
-products_2019_12[!products_2019_12 %in% products_2019_11]
-
-# TODO: create hierarchy for each sheet with indentation (not only once for each book)
-# If a sheet doesn't have indentation, apply the previous hierarchy
-
-unique_product_names <- sort(unique(data$product))
-length(unique_product_names)
-
+# Create unique names -----
 # Some names are uninterpretable on their own (e.g., "x1_litro") and would need adding their parent category
 # Products change names with time, making comparisons hard
 data |>
