@@ -111,6 +111,15 @@ get_hierarchy_table <- function(file_path) {
   data_hierarchy
 }
 
+# Function to check for a leap year
+is_leap_year <- function(year) {
+  if ((year %% 4 == 0 && year %% 100 != 0) || year %% 400 == 0) {
+    return(TRUE)
+  } else {
+    return(FALSE)
+  }
+}
+
 ### Transform Excel cells ----
 clean_file <- function(file_path) {
   # Loop for all sheets
@@ -175,6 +184,23 @@ clean_file <- function(file_path) {
         tidyselect::all_of(c("product", "variable", "region")),
         clean_names
       )
+    ) |>
+    # Pivot variables to make plotting easier
+    tidyr::pivot_wider(
+      values_from = "value",
+      names_from = "variable",
+      id_cols =
+    ) |>
+    # Adjust for different number of days per month
+    dplyr::mutate(
+      days_month = dplyr::case_when(
+        .data$month %in% c(1, 3, 5, 7, 8, 10, 12) ~ 31,
+        .data$month %in% c(4, 6, 9, 11) ~ 30,
+        .data$month %in% c(2) & !is_leap_year(.env$year) ~ 28,
+        .data$month %in% c(2) & is_leap_year(.env$year) ~ 29
+      ),
+      consumo_capita_dia = .data$consumo_x_capita / days_month,
+      gasto_capita_dia = .data$gasto_x_capita / days_month
     )
 
   # Obtain nested hierarchy
@@ -193,8 +219,8 @@ clean_file <- function(file_path) {
 # Step by step
 file_dir <- here::here("data-raw")
 file_list <- list.files(file_dir, pattern = "*.xlsx")
-# Test with two files
-loop_over <- seq_along(file_list)
+# loop_over <- seq_along(file_list)
+loop_over <- length(file_list)
 data_list <- vector(mode = "list", length = length(loop_over))
 for (i in loop_over) {
   file_name <- file_list[i]
@@ -206,13 +232,12 @@ for (i in loop_over) {
 data |>
   dplyr::filter(
     region == "t_espana",
-    variable == "consumo_x_capita",
     product == "platos_preparados"
   ) |>
   ggplot2::ggplot(
     ggplot2::aes(
       x = date,
-      y = value,
+      y = consumo_capita_dia,
       group = census_base,
       color = as.factor(month)
     )
@@ -228,4 +253,3 @@ data |>
 
 # Another way of adding unique ids for products/categories
 unique(data$year)
-unique(data$variable)
